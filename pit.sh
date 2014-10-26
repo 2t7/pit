@@ -10,20 +10,39 @@ pit -pack name [path]\n\
 	pack git folder at 'path' into pit archive with name 'name'\n\
 pit -add name file\n\
 	add file named 'file' to pit archive 'name'\n\
+**MULTI FILE MODE NOT YET SUPPORTED**\n\
 "
   exit 0
 fi
 TDIR=`mktemp -d`
 WD=`pwd`
 function repack() {
+  echo "pit: cleaning up ..."
   tar cf $ARCHIVE . 2>/dev/null
   cd $WD
-  cp -p $TDIR/$ARCHIVE .
-  if  [ ! cmp $FILE $TDIR/$FILE >/dev/null 2>&1 ]  ||  [ $FILE -nt $TDIR/$FILE ] || [ $FILE -ot $TDIR/$FILE ]
+  TMPFILE1=`mktemp`
+  TMPFILE2=`mktemp`
+  tar tvf $TDIR/$ARCHIVE --full-time | sort > $TMPFILE1
+  tar tvf $WD/$ARCHIVE --full-time | sort > $TMPFILE2
+  if [ ! cmp $TMPFILE1 $TMPFILE2 >/dev/null 2>&1 ]
   then
-    echo "pit: git call changed file => updating  $WD/$FILE" 
-    cp -p $TDIR/$FILE 
-  fi  
+    cp -p $TDIR/$ARCHIVE . 
+  fi
+  rm $TMPFILE1 $TMPFILE2
+  #cp -p $TDIR/$ARCHIVE .
+  TLIST=`tar tf $TDIR/$ARCHIVE | grep -v "./.git*" | grep -v "./\$"`
+  for F in $TLIST
+  do
+    F="${F#./}"
+    if [ -z $F ] && [ -f $F ] && [ ! cmp $F $TDIR/$F ] 
+    # ||  [ $F -nt $TDIR/$F ] || [ $F -ot $TDIR/$F ]
+    then
+      echo "pit: git call changed $F => updating $WD/$F"
+      cd $TDIR
+      #cp -pv --parents $F $WD/ 
+      cp -pv $F $WD/
+    fi
+  done
 }
 #--------------------------------------------------
 if [ $1 == "init" ]
@@ -97,7 +116,21 @@ then
   git add $FILE
   git commit -am "added file $FILE"
   repack
-  
+#--------------------------------------------------
+elif [ $1 == "clone" ]
+then
+  if [ $# -lt 3 ] || [ $# -gt 3 ]
+  then
+    echo -en "Wrong number of parameters, try \n pit clone name repo"
+  else
+    ARCHIVE=.$2.pit
+    NAME=$2
+    REPO=$3
+    cd $TDIR
+    git clone $REPO .
+    pit pack $NAME $TDIR
+    cp $TDIR/$ARCHIVE $WD
+  fi
 #--------------------------------------------------
 else
   if [ -f $1 ]
@@ -112,14 +145,6 @@ else
       echo ${@:2}
       git ${@:2}
       repack 
-      #tar cf $ARCHIVE . 2>/dev/null
-      #cd $WD
-      #cp -p $TDIR/$ARCHIVE .
-      #if  [ ! cmp $FILE $TDIR/$FILE >/dev/null 2>&1 ]  ||  [ $FILE -nt $TDIR/$FILE ] || [ $FILE -ot $TDIR/$FILE ]
-      #then
-      #  echo "pit: git call changed file => updating  $WD/$FILE" 
-      #  cp -p $TDIR/$FILE .
-      #fi
     else
       echo "Corresponding pit archive not found. You might create an archive by pit -init $1"
     fi
