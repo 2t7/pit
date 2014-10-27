@@ -15,21 +15,27 @@
 #You should have received a copy of the GNU General Public License
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-if [ $# -lt 1 ] || [ $1 == "-h" ]; then
+if [ $# -lt 2 ] || [ $1 == "-h" ]; then
   echo -en "\
 Usage:\n\
-pit name [gitargv]\n\
-	execute 'git gitargsv' on pit archive with name 'name'\n\
-pit name -init\n\
-	create a pit archive with name 'name' (optionally based on a file with same name)\n\
-pit name -unpack [path]\n
-	unpack pit archive to location at 'path' or if not specified the current directory\n
-pit name -pack [path]\n\
-	pack git folder at 'path' (or current directory if not specified) into pit archive with name 'name'\n\
-pit name -add file\n\
-	add file named 'file' to pit archive 'name'\n\
-pit name -clone gitlocation\n\
-	generates a pit archive from sources at gitlocation\n\
+pit name [gitargv]
+execute 'git gitargsv' on pit archive with name 'name'\n
+pit name -init
+create a pit archive with name 'name' (optionally based on a file with same name)\n
+pit name -unpack [path]
+unpack pit archive to location at 'path' or if not specified the current directory\n
+pit name -pack [path]
+pack git folder at 'path' (or current directory if not specified) into pit archive with name 'name'\n
+pit name -add file
+add file named 'file' to pit archive 'name'\n
+pit name -add file
+add file named 'file' to pit archive 'name' and execute git add name\n
+pit name -clone gitlocation
+generates a pit archive from sources at gitlocation\n
+pit name mv [argv]
+equals mv name .name.pit [argv]\n
+pit name co [argc]
+equals cp name .name.pit [argv]\n
 "
   exit 0
 fi
@@ -49,8 +55,8 @@ function repack() {
       cp -p $TDIR/$ARCHIVE . 
     fi
     rm $TMPFILE1 $TMPFILE2
-    TLIST=`tar tf $TDIR/$ARCHIVE | grep -v "^./.git" | grep -v "./\$"`
-    for F in $TLIST
+    FLIST=`tar tf $TDIR/$ARCHIVE | grep -v "^./.git" | grep -v "./\$"`
+    for F in $FLIST
     do
         F="${F#./}"
         cmp $F $TDIR/$F >/dev/null 2>&1
@@ -144,14 +150,17 @@ then
     cd $WD
     cp -p $TDIR/$ARCHIVE .
 #--------------------------------------------------
-elif [ $2 == "add" ]
+elif [ $2 == "add" ] || [ $2 == "gitadd" ]
 then
     ARCHIVE=.$1.pit
     FILE=$3
     tar xf $ARCHIVE -C $TDIR/
     cp -p $FILE $TDIR/
     cd $TDIR
-    git add $FILE
+    if [ $2 == "gitadd" ]
+    then
+        git add $FILE
+    fi
     repack
 #--------------------------------------------------
 elif [ $2 == "clone" ]
@@ -160,14 +169,32 @@ then
     then
         echo -en "Wrong number of parameters, try \n pit name clone repository"
     else
-        ARCHIVE=.$2.pit
-        NAME=$2
+        ARCHIVE=.$1.pit
+        NAME=$1
         REPO=$3
         cd $TDIR
         git clone $REPO .
-        pit pack $NAME $TDIR
+        pit $NAME pack $TDIR
         cp $TDIR/$ARCHIVE $WD
     fi
+#--------------------------------------------------
+elif [ $2 == "cp" ]
+then
+    if [ -f .$1.pit ]
+    then
+        ARCHIVE=.$1.pit
+        FLIST=`tar tf $ARCHIVE | grep -v "^./.git"  |grep -v "./\$"| sort`
+        for F in $FLIST
+        do
+            if [ -e $F ] #could do -f if it were not for empty folders...
+            then
+                $2 $F $ARCHIVE "${@:3}" --parents
+            fi
+        done
+    fi
+    $2 .$1.pit "${@:3}"
+#--------------------------------------------------
+# mv command is more complicated and maybe bad idea
 #--------------------------------------------------
 elif [ $2 == "git" ]
 then
@@ -176,7 +203,6 @@ then
         FILE=$1
         ARCHIVE=.$1.pit
         tar xf $ARCHIVE -C $TDIR/
-        #TODO also copy all other modified files
         FLIST=`tar tf $ARCHIVE | grep -v "^./.git"  |grep -v "./\$"| sort`
         for F in $FLIST
         do
@@ -192,8 +218,6 @@ then
                 fi
             fi
         done
-        #TODO-ende-
-        #cp -p $FILE $TDIR/
         cd $TDIR
         git "${@:3}"
         repack 
@@ -202,3 +226,5 @@ then
     fi
 fi
 rm -rf $TDIR
+
+#TODO: Check for first argument included everywhere??
