@@ -15,62 +15,70 @@
 #You should have received a copy of the GNU General Public License
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#--------------------------------------------------
 if [ $# -lt 2 ] || [ $1 == "-h" ]; then
-  echo -en "\
-Usage:\n\
-pit name [gitargv]
-execute 'git gitargsv' on pit archive with name 'name'\n
-pit name -init
+  echo -en "
+Usage:\n
+pit name git [gitargv]
+execute 'git gitargv' on pit archive with name 'name'\n
+pit name init
 create a pit archive with name 'name' (optionally based on a file with same name)\n
-pit name -unpack [path]
+pit name unpack [path]
 unpack pit archive to location at 'path' or if not specified the current directory\n
-pit name -pack [path]
+pit name pack [path]
 pack git folder at 'path' (or current directory if not specified) into pit archive with name 'name'\n
-pit name -add file
-add file named 'file' to pit archive 'name'\n
-pit name -add file
-add file named 'file' to pit archive 'name' and execute git add name\n
-pit name -clone gitlocation
+pit name clone gitlocation
 generates a pit archive from sources at gitlocation\n
-pit name mv [argv]
-equals mv name .name.pit [argv]\n
-pit name co [argc]
-equals cp name .name.pit [argv]\n
+pit name add file
+add file named 'file' to pit archive 'name'\n
+pit name gitadd file
+like 'pit name add file && pit name git add' but in one step (faster)\n
 "
   exit 0
 fi
+#------------------------------------------------
+# general variables and functions
+#------------------------------------------------
 TDIR=`mktemp -d`
 WD=`pwd`
 function repack() {
+    cd $TDIR
     tar cf $ARCHIVE . 2>/dev/null
     cd $WD
     TMPFILE1=`mktemp`
     TMPFILE2=`mktemp`
-    tar tvf $TDIR/$ARCHIVE --full-time | grep -v "./\$"| sort > $TMPFILE1
-    tar tvf $WD/$ARCHIVE --full-time | grep -v "./\$" | sort > $TMPFILE2
+    tar tvf $TDIR/$ARCHIVE --full-time | \
+	grep -v "\./\$"| sort > $TMPFILE1
+    tar tvf $WD/$ARCHIVE --full-time | \
+	grep -v "\./\$" | sort > $TMPFILE2
     cmp $TMPFILE1 $TMPFILE2 >/dev/null 2>&1
     CMP=$?
     if [ $CMP -ne 0 ]
     then
-      cp -p $TDIR/$ARCHIVE . 
+        cp -p $TDIR/$ARCHIVE $WD/$ARCHIVE 
+        rm $TMPFILE1 $TMPFILE2
+        IFS=$(echo -en "\n\b")
+        FLIST=`tar tf $TDIR/$ARCHIVE | \
+		grep -v "^\./.git" | grep -v "\./\$"`
+        for F in $FLIST
+        do
+            F="${F#./}"
+            cmp $F $WD/$F >/dev/null 2>&1
+            CMP=$?
+            if [ ! -z $F ] && [ $CMP -ne 0 ]
+            then
+                 echo "pit: git call changed $F => updating $WD/$F"
+                 cd $TDIR
+                 echo $F
+                 echo $WD
+                 cp -ipr --parents $F $WD/ 
+                 cd $WD
+            fi
+        done
     fi
-    rm $TMPFILE1 $TMPFILE2
-    FLIST=`tar tf $TDIR/$ARCHIVE | grep -v "^./.git" | grep -v "./\$"`
-    for F in $FLIST
-    do
-        F="${F#./}"
-        cmp $F $TDIR/$F >/dev/null 2>&1
-        CMP=$?
-        if [ ! -z $F ] && [ $CMP -ne 0 ] 
-        then
-             echo "pit: git call changed $F => updating $WD/$F"
-             cd $TDIR
-             cp -ip --parents $F $WD/ 
-             #cp -pv $F $WD/
-             cd $WD
-        fi
-    done
 }
+#--------------------------------------------------
+# init new pit archive
 #--------------------------------------------------
 if [ $2 == "init" ]
 then
@@ -119,12 +127,15 @@ Are you sure you want to init a NEW pit archive?\n\
         cp -p $TDIR/$ARCHIVE .
     fi
 #--------------------------------------------------
+# unpack the pit archive (just a tar archive)
+#--------------------------------------------------
 elif [ $2 == "unpack" ]
 then
     ARCHIVE=.$1.pit
     if [ $# -lt 2 ]
     then
-        echo "wrong number of arguments. try 'pit name unpack [path]'"
+        echo "wrong number of arguments. try:
+'pit name unpack [path]'"
     elif [ ! -f $ARCHIVE ]
     then
         echo "pit archive $ARCHIVE not found!"
@@ -136,6 +147,8 @@ then
             tar -xf $ARCHIVE -C $3
         fi
     fi
+#--------------------------------------------------
+# create pit archive from existing .git folder
 #--------------------------------------------------
 elif [ $2 == "pack" ]
 then
@@ -150,6 +163,8 @@ then
     cd $WD
     cp -p $TDIR/$ARCHIVE .
 #--------------------------------------------------
+# add a file to the pit archive (nontrivial!)
+#--------------------------------------------------
 elif [ $2 == "add" ] || [ $2 == "gitadd" ]
 then
     ARCHIVE=.$1.pit
@@ -163,11 +178,14 @@ then
     fi
     repack
 #--------------------------------------------------
+# clone a git repo and convert to pit archive
+#--------------------------------------------------
 elif [ $2 == "clone" ]
 then
     if [ $# -lt 3 ] || [ $# -gt 3 ]
     then
-        echo -en "Wrong number of parameters, try \n pit name clone repository"
+        echo -en "Wrong number of parameters, try 
+ pit name clone repository"
     else
         ARCHIVE=.$1.pit
         NAME=$1
@@ -178,15 +196,20 @@ then
         cp $TDIR/$ARCHIVE $WD
     fi
 #--------------------------------------------------
+# copy the .pit file and all files to another loc.
+# scales badly due to multiple copying of folders
+#--------------------------------------------------
 elif [ $2 == "cp" ]
 then
     if [ -f .$1.pit ]
     then
         ARCHIVE=.$1.pit
-        FLIST=`tar tf $ARCHIVE | grep -v "^./.git"  |grep -v "./\$"| sort`
+        IFS=$(echo -en "\n\b")
+        FLIST=`tar tf $ARCHIVE | grep -v "^./.git" |\
+		grep -v "^./\$"| sort`
         for F in $FLIST
         do
-            if [ -e $F ] #could do -f if it were not for empty folders...
+            if [ -e $F ]
             then
                 $2 $F $ARCHIVE "${@:3}" --parents
             fi
@@ -196,6 +219,10 @@ then
 #--------------------------------------------------
 # mv command is more complicated and maybe bad idea
 #--------------------------------------------------
+# TODO: implement
+#--------------------------------------------------
+# execute arbitrary git commands
+#--------------------------------------------------
 elif [ $2 == "git" ]
 then
     if [ -f .$1.pit ]
@@ -203,26 +230,35 @@ then
         FILE=$1
         ARCHIVE=.$1.pit
         tar xf $ARCHIVE -C $TDIR/
-        FLIST=`tar tf $ARCHIVE | grep -v "^./.git"  |grep -v "./\$"| sort`
+        #TEMPFILE1=`mktemp`
+        IFS=$(echo -en "\n\b")
+        FLIST=`tar tf $ARCHIVE | grep -v "^\./.git" |\
+		grep -v "^\./\$"| sort`
         for F in $FLIST
         do
-            if [ ! -e $F ]
+            F="${F#./}"
+            if [ ! -z $F ] && [ ! -e $F ]
             then
-                rm -rf $TDIR/$F
-            else
-                cmp $F $TDIR/$F
+                rm -rf "$TDIR/$F"
+                echo "pit: removed $TDIR/$F"
+            elif [ ! -z -$F ] && [ -e $F ]
+            then
+                cmp $F $TDIR/$F >/dev/null 2>&1
                 CMP=$?
-                if [ $CMP -ne 0 ]
+                if [ ! -d $F ] && [ ! -d $WD/$F ] \
+                     && [ $CMP -ne 0 ]
                 then
-                    cp -p --parents $F $TDIR/
+                    echo `pwd`
+                    cp -p --parents "$F" $TDIR/
                 fi
             fi
         done
         cd $TDIR
         git "${@:3}"
-        repack 
+        repack
     else
-        echo "Corresponding pit archive not found. You might create an archive by pit init $1 init"
+        echo "Corresponding pit archive not found.\
+ You might create an archive by pit init $1 init"
     fi
 fi
 rm -rf $TDIR
